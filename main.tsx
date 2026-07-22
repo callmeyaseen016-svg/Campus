@@ -1,240 +1,121 @@
 import React, { useState } from 'react';
-import { 
-  Heart, 
-  Send, 
-  Trash2, 
-  BookOpen, 
-  Bike, 
-  Laptop, 
-  Package, 
-  MessageSquare,
-  Share2,
-  Check,
-  UserCheck
-} from 'lucide-react';
+import { X, Send, Mail, MessageCircle, Copy, Check, Sparkles } from 'lucide-react';
 import { Listing } from '../types';
 import { useAuth } from '../context/AuthContext';
-import { deleteListingFromStore } from '../lib/firebase';
 
-interface ListingCardProps {
-  listing: Listing;
-  isFav: boolean;
-  onToggleFav: (id: string) => void;
-  onMessageClick: (listing: Listing) => void;
-  onShareSuccess: (msg: string) => void;
-  cardIndex: number;
+interface MessageSellerModalProps {
+  listing: Listing | null;
+  onClose: () => void;
+  onToast: (msg: string) => void;
 }
 
-export const ListingCard: React.FC<ListingCardProps> = ({
+export const MessageSellerModal: React.FC<MessageSellerModalProps> = ({
   listing,
-  isFav,
-  onToggleFav,
-  onMessageClick,
-  onShareSuccess,
-  cardIndex
+  onClose,
+  onToast
 }) => {
   const { user } = useAuth();
-  const [isDeleting, setIsDeleting] = useState(false);
+  const [copied, setCopied] = useState(false);
 
-  // Slight tilt effect for physical notebook index-card feel
-  const tilts = ['-rotate-1', 'rotate-1', '-rotate-0.5', 'rotate-0.5'];
-  const cardTilt = tilts[cardIndex % tilts.length];
+  if (!listing) return null;
 
-  const isOwner = user && user.uid === listing.sellerId;
+  const defaultMsg = `Hi ${listing.sellerName || 'there'}! I saw your "${listing.name}" listed for ₹${listing.price} on Campus Cart. Is it still available for campus pickup?`;
+  const [message, setMessage] = useState(defaultMsg);
 
-  // Render placeholder category icon if no image provided
-  const renderCategoryPlaceholder = () => {
-    switch (listing.category) {
-      case 'Books':
-        return (
-          <div className="w-full h-48 bg-[#C9E2F5]/30 flex flex-col items-center justify-center text-[#1B3A5C]/60 rounded-t-2xl">
-            <BookOpen className="w-12 h-12 text-[#1B3A5C]/40 mb-1" />
-            <span className="text-xs font-bold uppercase tracking-wider">Book Listing</span>
-          </div>
-        );
-      case 'Cycles':
-        return (
-          <div className="w-full h-48 bg-[#FFD93D]/20 flex flex-col items-center justify-center text-[#1B3A5C]/60 rounded-t-2xl">
-            <Bike className="w-12 h-12 text-[#1B3A5C]/40 mb-1" />
-            <span className="text-xs font-bold uppercase tracking-wider">Campus Cycle</span>
-          </div>
-        );
-      case 'Electronics':
-        return (
-          <div className="w-full h-48 bg-[#E63946]/10 flex flex-col items-center justify-center text-[#1B3A5C]/60 rounded-t-2xl">
-            <Laptop className="w-12 h-12 text-[#1B3A5C]/40 mb-1" />
-            <span className="text-xs font-bold uppercase tracking-wider">Electronics</span>
-          </div>
-        );
-      default:
-        return (
-          <div className="w-full h-48 bg-[#FAFBFC] flex flex-col items-center justify-center text-[#1B3A5C]/60 rounded-t-2xl border-b border-[#1B3A5C]/10">
-            <Package className="w-12 h-12 text-[#1B3A5C]/40 mb-1" />
-            <span className="text-xs font-bold uppercase tracking-wider">General Item</span>
-          </div>
-        );
-    }
+  const sellerEmail = listing.sellerContact || `${listing.sellerName?.toLowerCase().replace(/\s+/g, '.')}@vitstudent.ac.in`;
+
+  const handleCopyMessage = () => {
+    navigator.clipboard.writeText(message);
+    setCopied(true);
+    onToast('Message copied to clipboard!');
+    setTimeout(() => setCopied(false), 2000);
   };
 
-  const handleShare = async () => {
-    const url = window.location.href.split('#')[0];
-    const text = `${listing.name} — ₹${listing.price}, ${listing.condition}. Check it out on Campus Cart: ${url}`;
-
-    if (navigator.share) {
-      try {
-        await navigator.share({
-          title: `Campus Cart: ${listing.name}`,
-          text,
-          url
-        });
-      } catch (err) {
-        // Fallback to clipboard if share dismissed
-        copyToClipboard(text);
-      }
-    } else {
-      copyToClipboard(text);
-    }
-  };
-
-  const copyToClipboard = (text: string) => {
-    navigator.clipboard.writeText(text);
-    onShareSuccess('Copied share link to clipboard!');
-  };
-
-  const handleDelete = async () => {
-    if (window.confirm(`Are you sure you want to delete "${listing.name}"?`)) {
-      setIsDeleting(true);
-      try {
-        await deleteListingFromStore(listing.id);
-      } catch (e) {
-        console.error('Delete error:', e);
-        setIsDeleting(false);
-      }
-    }
+  const handleSendEmail = () => {
+    const subject = encodeURIComponent(`Campus Cart Inquiry: ${listing.name}`);
+    const body = encodeURIComponent(message);
+    window.open(`mailto:${sellerEmail}?subject=${subject}&body=${body}`, '_blank');
+    onToast('Opening mail app...');
+    onClose();
   };
 
   return (
-    <article className={`notebook-card rounded-2xl relative flex flex-col justify-between overflow-hidden ${cardTilt} animate-fade-in-up`}>
-      
-      {/* Top Banner & Photo Area */}
-      <div className="relative">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[#1B3A5C]/40 backdrop-blur-xs animate-fade-in-up">
+      <div className="bg-[#FAFBFC] border-2 border-[#1B3A5C] rounded-3xl p-6 sm:p-8 max-w-lg w-full shadow-2xl relative">
         
-        {/* Sticky-Note Yellow Category Tag in Top Left Corner */}
-        <div className="absolute top-3 left-3 z-10">
-          <span className="sticky-note px-2.5 py-1 rounded-md text-[11px] font-black uppercase tracking-wider border border-[#1B3A5C]/15 shadow-xs">
-            {listing.category}
-          </span>
-        </div>
-
-        {/* Doodle Heart Favourite Icon in Top Right Corner */}
+        {/* Close Button */}
         <button
-          onClick={() => onToggleFav(listing.id)}
-          className="absolute top-3 right-3 z-10 bg-white/90 backdrop-blur-xs p-2 rounded-full border border-[#1B3A5C]/20 shadow-xs hover:scale-110 transition-transform cursor-pointer"
-          title={isFav ? "Remove from favourites" : "Save to favourites"}
+          onClick={onClose}
+          className="absolute top-4 right-4 text-[#1B3A5C]/60 hover:text-[#1B3A5C] p-1 rounded-full cursor-pointer"
         >
-          <Heart 
-            className={`w-4 h-4 transition-colors ${
-              isFav ? 'fill-[#E63946] text-[#E63946]' : 'text-[#1B3A5C]/70'
-            }`} 
-          />
+          <X className="w-5 h-5" />
         </button>
 
-        {/* Item Photo or Category Illustration */}
-        {listing.imageBase64 ? (
-          <div className="w-full h-48 overflow-hidden bg-black/5 border-b border-[#1B3A5C]/10">
+        {/* Modal Header */}
+        <div className="flex items-center gap-3 mb-4">
+          {listing.sellerPhoto ? (
             <img
-              src={listing.imageBase64}
-              alt={listing.name}
-              className="w-full h-full object-cover hover:scale-105 transition-transform duration-300"
+              src={listing.sellerPhoto}
+              alt={listing.sellerName || 'Seller'}
+              className="w-12 h-12 rounded-2xl object-cover border-2 border-[#1B3A5C]/20 shadow-xs"
             />
-          </div>
-        ) : (
-          renderCategoryPlaceholder()
-        )}
-      </div>
-
-      {/* Card Content Details */}
-      <div className="p-4 sm:p-5 flex-1 flex flex-col justify-between">
-        <div>
-          
-          {/* Header Row: Title & Price */}
-          <div className="flex items-start justify-between gap-2 mb-2">
-            <h3 className="font-extrabold text-base text-[#1B3A5C] leading-snug line-clamp-2">
-              {listing.name}
-            </h3>
-            <span className="text-lg font-black text-[#E63946] shrink-0">
-              ₹{listing.price.toLocaleString()}
-            </span>
-          </div>
-
-          {/* Condition Badge & Seller Tag */}
-          <div className="flex items-center justify-between gap-2 my-2.5">
-            <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-[#1B3A5C]/10 text-[#1B3A5C] border border-[#1B3A5C]/20">
-              {listing.condition}
-            </span>
-
-            {/* Seller profile info */}
-            <div className="flex items-center gap-1.5 text-[11px] font-semibold text-[#1B3A5C]/70">
-              {listing.sellerPhoto ? (
-                <img
-                  src={listing.sellerPhoto}
-                  alt={listing.sellerName || 'Seller'}
-                  className="w-5 h-5 rounded-full object-cover border border-[#1B3A5C]/20"
-                />
-              ) : (
-                <div className="w-5 h-5 rounded-full bg-[#C9E2F5] text-[#1B3A5C] flex items-center justify-center text-[9px] font-black">
-                  {(listing.sellerName || 'S').charAt(0)}
-                </div>
-              )}
-              <span className="max-w-[100px] truncate">
-                {listing.sellerName || 'Campus Seller'}
-              </span>
+          ) : (
+            <div className="w-12 h-12 rounded-2xl bg-[#FFD93D] text-[#1B3A5C] flex items-center justify-center font-black text-lg border-2 border-[#1B3A5C]/20">
+              {(listing.sellerName || 'S').charAt(0)}
             </div>
+          )}
+          <div>
+            <h3 className="font-extrabold text-lg text-[#1B3A5C]">
+              Message {listing.sellerName || 'Seller'}
+            </h3>
+            <p className="text-xs text-[#1B3A5C]/70 font-semibold truncate">
+              Inquiring about: <strong className="text-[#E63946]">{listing.name}</strong> (₹{listing.price})
+            </p>
           </div>
-
-          {/* Short Description */}
-          <p className="text-xs text-[#1B3A5C]/80 line-clamp-2 leading-relaxed mb-4">
-            {listing.description}
-          </p>
         </div>
 
-        {/* Card Footer Action Buttons */}
-        <div className="pt-3 border-t border-[#1B3A5C]/10 flex items-center gap-2">
-          
-          {/* Message Seller Button */}
+        {/* Seller Email Pill */}
+        <div className="sticky-note p-3 rounded-2xl border border-[#1B3A5C]/20 text-xs font-bold mb-4 flex items-center justify-between">
+          <div className="flex items-center gap-2 text-[#1B3A5C]">
+            <Mail className="w-4 h-4 text-[#E63946]" />
+            <span className="truncate">{sellerEmail}</span>
+          </div>
+          <span className="text-[10px] font-black uppercase text-[#1B3A5C]/60">Verified VIT Student</span>
+        </div>
+
+        {/* Message Area */}
+        <div className="mb-6">
+          <label className="block text-xs font-extrabold text-[#1B3A5C] uppercase tracking-wider mb-2">
+            Your Message
+          </label>
+          <textarea
+            rows={4}
+            value={message}
+            onChange={(e) => setMessage(e.target.value)}
+            className="w-full px-4 py-3 rounded-2xl border-2 border-[#1B3A5C]/20 focus:border-[#1B3A5C] bg-white text-sm font-medium text-[#1B3A5C] outline-none resize-none"
+          />
+        </div>
+
+        {/* Actions */}
+        <div className="flex flex-col sm:flex-row items-center gap-3">
           <button
-            onClick={() => onMessageClick(listing)}
-            className="flex-1 btn-notebook-red py-2 px-3 text-xs flex items-center justify-center gap-1.5 cursor-pointer"
+            onClick={handleSendEmail}
+            className="w-full sm:flex-1 btn-notebook-red py-3 px-4 text-xs sm:text-sm flex items-center justify-center gap-2 cursor-pointer"
           >
-            <MessageSquare className="w-3.5 h-3.5" />
-            <span>Message seller</span>
+            <Mail className="w-4 h-4" />
+            <span>Send Email Direct</span>
           </button>
 
-          {/* Share Button (Paper Plane Icon) */}
           <button
-            onClick={handleShare}
-            className="p-2 bg-white text-[#1B3A5C] border border-[#1B3A5C]/20 rounded-xl hover:bg-[#C9E2F5]/30 transition-colors cursor-pointer"
-            title="Share listing"
+            onClick={handleCopyMessage}
+            className="w-full sm:w-auto py-3 px-4 rounded-full bg-white text-[#1B3A5C] font-bold text-xs border-2 border-[#1B3A5C] hover:bg-[#C9E2F5]/40 transition-colors cursor-pointer flex items-center justify-center gap-1.5"
           >
-            <Send className="w-4 h-4 text-[#1B3A5C]" />
+            {copied ? <Check className="w-4 h-4 text-green-600" /> : <Copy className="w-4 h-4" />}
+            <span>{copied ? 'Copied!' : 'Copy Text'}</span>
           </button>
-
-          {/* Delete Option (for Seller Owner) */}
-          {isOwner && (
-            <button
-              onClick={handleDelete}
-              disabled={isDeleting}
-              className="p-2 bg-[#E63946]/10 text-[#E63946] border border-[#E63946]/30 rounded-xl hover:bg-[#E63946]/20 transition-colors cursor-pointer"
-              title="Delete my listing"
-            >
-              <Trash2 className="w-4 h-4 stroke-[2]" />
-            </button>
-          )}
-
         </div>
 
       </div>
-
-    </article>
+    </div>
   );
 };

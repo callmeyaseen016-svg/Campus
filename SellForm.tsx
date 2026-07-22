@@ -1,278 +1,187 @@
-import { initializeApp, getApps, getApp, FirebaseApp } from 'firebase/app';
+import React, { createContext, useContext, useEffect, useState } from 'react';
 import { 
-  getFirestore, 
-  collection, 
-  addDoc, 
-  deleteDoc, 
-  doc, 
-  onSnapshot, 
-  query, 
-  orderBy, 
-  Firestore,
-  getDocFromServer
-} from 'firebase/firestore';
-import { 
-  getAuth, 
-  GoogleAuthProvider, 
+  User, 
   signInWithPopup, 
-  signOut, 
-  onAuthStateChanged, 
-  Auth, 
-  User 
+  signOut as firebaseSignOut, 
+  onAuthStateChanged 
 } from 'firebase/auth';
-import { Listing, AuthUser } from '../types';
-import { DEFAULT_LISTINGS } from '../data/defaultListings';
+import { auth, googleProvider, isFirebaseConfigured } from '../lib/firebase';
+import { AuthUser } from '../types';
 
-// Default Firebase configuration provided by user
-const DEFAULT_FIREBASE_CONFIG = {
-  apiKey: "AIzaSyD9M4iAUdsm_x9o_8CyaxPe3f16wzNQ-0o",
-  authDomain: "marketplace-cb06e.firebaseapp.com",
-  projectId: "marketplace-cb06e",
-  storageBucket: "marketplace-cb06e.firebasestorage.app",
-  messagingSenderId: "817625626559",
-  appId: "1:817625626559:web:ab560af75e08be5f97130a",
-  measurementId: "G-5BTBJZ4WYK"
-};
-
-// Check for stored custom firebase config or environment variables
-const getStoredConfig = () => {
-  try {
-    const custom = localStorage.getItem('campus_cart_firebase_config');
-    if (custom) {
-      return JSON.parse(custom);
-    }
-  } catch (e) {
-    console.warn('Failed to parse custom firebase config:', e);
-  }
-
-  const apiKey = import.meta.env.VITE_FIREBASE_API_KEY;
-  if (apiKey) {
-    return {
-      apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
-      authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
-      projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
-      storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
-      messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
-      appId: import.meta.env.VITE_FIREBASE_APP_ID
-    };
-  }
-
-  return DEFAULT_FIREBASE_CONFIG;
-};
-
-let app: FirebaseApp | null = null;
-let db: Firestore | null = null;
-let auth: Auth | null = null;
-let googleProvider: GoogleAuthProvider | null = null;
-
-const config = getStoredConfig();
-
-if (config && config.apiKey && config.projectId) {
-  try {
-    app = getApps().length === 0 ? initializeApp(config) : getApp();
-    db = getFirestore(app);
-    auth = getAuth(app);
-    googleProvider = new GoogleAuthProvider();
-    googleProvider.setCustomParameters({ prompt: 'select_account' });
-  } catch (err) {
-    console.error('Error initializing Firebase with provided config:', err);
-  }
+interface AuthContextType {
+  user: AuthUser | null;
+  loading: boolean;
+  domainError: string | null;
+  signInWithGoogle: () => Promise<AuthUser | null>;
+  signOutUser: () => Promise<void>;
+  clearDomainError: () => void;
+  bypassDomainCheck: boolean;
+  setBypassDomainCheck: (val: boolean) => void;
+  signInAsDemoUser: () => void;
 }
 
-export { db, auth, googleProvider };
+const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-// Save custom config dynamically at runtime
-export const saveCustomFirebaseConfig = (cfg: any) => {
-  try {
-    localStorage.setItem('campus_cart_firebase_config', JSON.stringify(cfg));
-    window.location.reload();
-  } catch (e) {
-    console.error('Failed to save firebase config:', e);
-  }
+const DEMO_USER: AuthUser = {
+  uid: 'demo-student-vit-2026',
+  email: 'rahul.s2023@vitstudent.ac.in',
+  displayName: 'Rahul Sharma',
+  photoURL: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&q=80&w=200',
+  firstName: 'Rahul',
+  isVitStudent: true
 };
 
-export const clearCustomFirebaseConfig = () => {
-  localStorage.removeItem('campus_cart_firebase_config');
-  window.location.reload();
-};
+export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const [user, setUser] = useState<AuthUser | null>(null);
+  const [loading, setLoading] = useState<boolean>(true);
+  const [domainError, setDomainError] = useState<string | null>(null);
+  const [bypassDomainCheck, setBypassDomainCheck] = useState<boolean>(false);
 
-export const isFirebaseConfigured = () => {
-  return db !== null && auth !== null;
-};
-
-// Test firestore connection as requested by firebase skill guidelines
-export const testFirestoreConnection = async () => {
-  if (!db) return false;
-  try {
-    await getDocFromServer(doc(db, 'listings', 'test_connection'));
-    return true;
-  } catch (error) {
-    if (error instanceof Error && error.message.includes('offline')) {
-      console.warn('Firestore offline:', error.message);
+  // Helper to extract first name
+  const parseFirstName = (displayName: string | null, email: string | null): string => {
+    if (displayName) {
+      const parts = displayName.trim().split(' ');
+      return parts[0];
     }
-    return false;
-  }
-};
-
-// Helper enum and error handler matching skill guidelines
-export enum OperationType {
-  CREATE = 'create',
-  UPDATE = 'update',
-  DELETE = 'delete',
-  LIST = 'list',
-  GET = 'get',
-  WRITE = 'write',
-}
-
-export function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
-  const errInfo = {
-    error: error instanceof Error ? error.message : String(error),
-    authInfo: {
-      userId: auth?.currentUser?.uid,
-      email: auth?.currentUser?.email,
-      emailVerified: auth?.currentUser?.emailVerified,
-    },
-    operationType,
-    path
+    if (email) {
+      const handle = email.split('@')[0];
+      const clean = handle.replace(/[0-9_.]/g, ' ');
+      const namePart = clean.trim().split(' ')[0];
+      return namePart.charAt(0).toUpperCase() + namePart.slice(1);
+    }
+    return 'Student';
   };
-  console.error('Firestore Error:', JSON.stringify(errInfo));
-  throw new Error(JSON.stringify(errInfo));
-}
 
-// Subscribe to real-time listings from Firestore or local fallback
-export const subscribeToListings = (
-  callback: (listings: Listing[]) => void,
-  onError?: (err: any) => void
-) => {
-  if (db) {
-    try {
-      const q = query(collection(db, 'listings'), orderBy('createdAt', 'desc'));
-      return onSnapshot(
-        q,
-        (snapshot) => {
-          const fetched: Listing[] = [];
-          snapshot.forEach((docSnap) => {
-            const data = docSnap.data();
-            fetched.push({
-              id: docSnap.id,
-              name: data.name || 'Untitled Item',
-              category: data.category || 'Other',
-              price: Number(data.price) || 0,
-              condition: data.condition || 'Good',
-              description: data.description || '',
-              imageBase64: data.imageBase64 || undefined,
-              createdAt: data.createdAt || Date.now(),
-              sellerId: data.sellerId || 'anonymous',
-              sellerName: data.sellerName || 'Campus Seller',
-              sellerPhoto: data.sellerPhoto || undefined,
-              sellerContact: data.sellerContact || undefined,
-            });
-          });
+  useEffect(() => {
+    // Check if demo user session saved
+    const savedDemo = localStorage.getItem('campus_cart_demo_user');
+    if (savedDemo) {
+      setUser(JSON.parse(savedDemo));
+      setLoading(false);
+      return;
+    }
 
-          if (fetched.length === 0) {
-            // Seed defaults into local view if Firestore is empty
-            callback(DEFAULT_LISTINGS);
+    if (auth && isFirebaseConfigured()) {
+      const unsubscribe = onAuthStateChanged(auth, async (firebaseUser: User | null) => {
+        if (firebaseUser) {
+          const email = firebaseUser.email || '';
+          const isVit = email.toLowerCase().endsWith('@vitstudent.ac.in');
+
+          if (!isVit && !bypassDomainCheck) {
+            // Sign out immediately as per requirement
+            await firebaseSignOut(auth);
+            setUser(null);
+            setDomainError(email || 'your email');
           } else {
-            callback(fetched);
+            setDomainError(null);
+            const authUser: AuthUser = {
+              uid: firebaseUser.uid,
+              email: firebaseUser.email,
+              displayName: firebaseUser.displayName,
+              photoURL: firebaseUser.photoURL || `https://api.dicebear.com/7.x/bottts/svg?seed=${firebaseUser.uid}`,
+              firstName: parseFirstName(firebaseUser.displayName, firebaseUser.email),
+              isVitStudent: true
+            };
+            setUser(authUser);
           }
-        },
-        (error) => {
-          console.warn('Firestore listener fallback to local:', error);
-          if (onError) onError(error);
-          // Fallback to local storage if permission denied or offline
-          const local = getLocalListings();
-          callback(local);
+        } else {
+          setUser(null);
         }
-      );
-    } catch (err) {
-      console.error('Error setting up Firestore listener:', err);
-      const local = getLocalListings();
-      callback(local);
-      return () => {};
-    }
-  } else {
-    // Local fallback listener with window events for multi-tab sync in local mode
-    const notify = () => {
-      callback(getLocalListings());
-    };
-    notify();
-
-    const handleStorage = (e: StorageEvent) => {
-      if (e.key === 'campus_cart_listings_v1') {
-        notify();
-      }
-    };
-    window.addEventListener('storage', handleStorage);
-    window.addEventListener('local_listings_updated', notify);
-
-    return () => {
-      window.removeEventListener('storage', handleStorage);
-      window.removeEventListener('local_listings_updated', notify);
-    };
-  }
-};
-
-// Local storage management for fallback when Firebase is not yet connected
-const getLocalListings = (): Listing[] => {
-  try {
-    const stored = localStorage.getItem('campus_cart_listings_v1');
-    if (stored) {
-      return JSON.parse(stored);
-    }
-  } catch (e) {
-    console.error('Failed to parse local listings:', e);
-  }
-  return DEFAULT_LISTINGS;
-};
-
-const saveLocalListings = (listings: Listing[]) => {
-  try {
-    localStorage.setItem('campus_cart_listings_v1', JSON.stringify(listings));
-    window.dispatchEvent(new Event('local_listings_updated'));
-  } catch (e) {
-    console.error('Failed to save local listings:', e);
-  }
-};
-
-// Add new listing to Firestore or local state
-export const addListingToStore = async (
-  listingData: Omit<Listing, 'id'>
-): Promise<string> => {
-  if (db) {
-    try {
-      const docRef = await addDoc(collection(db, 'listings'), {
-        ...listingData,
-        createdAt: listingData.createdAt || Date.now()
+        setLoading(false);
       });
-      return docRef.id;
-    } catch (error) {
-      handleFirestoreError(error, OperationType.WRITE, 'listings');
-      throw error;
+
+      return () => unsubscribe();
+    } else {
+      setLoading(false);
     }
-  } else {
-    const current = getLocalListings();
-    const newListing: Listing = {
-      ...listingData,
-      id: `local-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`
-    };
-    const updated = [newListing, ...current];
-    saveLocalListings(updated);
-    return newListing.id;
-  }
+  }, [bypassDomainCheck]);
+
+  const signInWithGoogle = async (): Promise<AuthUser | null> => {
+    setDomainError(null);
+    if (auth && googleProvider && isFirebaseConfigured()) {
+      try {
+        const result = await signInWithPopup(auth, googleProvider);
+        const firebaseUser = result.user;
+        const email = firebaseUser.email || '';
+        const isVit = email.toLowerCase().endsWith('@vitstudent.ac.in');
+
+        if (!isVit && !bypassDomainCheck) {
+          await firebaseSignOut(auth);
+          setUser(null);
+          setDomainError(email || 'your email');
+          return null;
+        }
+
+        const authUser: AuthUser = {
+          uid: firebaseUser.uid,
+          email: firebaseUser.email,
+          displayName: firebaseUser.displayName,
+          photoURL: firebaseUser.photoURL || `https://api.dicebear.com/7.x/bottts/svg?seed=${firebaseUser.uid}`,
+          firstName: parseFirstName(firebaseUser.displayName, firebaseUser.email),
+          isVitStudent: true
+        };
+        setUser(authUser);
+        return authUser;
+      } catch (error: any) {
+        console.error('Google Auth Error:', error);
+        // If popup blocked or cancelled, allow quick demo fallback for seamless testing
+        if (error.code === 'auth/popup-closed-by-user' || error.code === 'auth/cancelled-popup-request') {
+          console.warn('User closed auth popup.');
+        }
+        throw error;
+      }
+    } else {
+      // Fallback for demo when Firebase config is missing or in offline mode
+      signInAsDemoUser();
+      return DEMO_USER;
+    }
+  };
+
+  const signInAsDemoUser = () => {
+    setDomainError(null);
+    localStorage.setItem('campus_cart_demo_user', JSON.stringify(DEMO_USER));
+    setUser(DEMO_USER);
+  };
+
+  const signOutUser = async () => {
+    localStorage.removeItem('campus_cart_demo_user');
+    if (auth && isFirebaseConfigured()) {
+      try {
+        await firebaseSignOut(auth);
+      } catch (e) {
+        console.error('Sign out error:', e);
+      }
+    }
+    setUser(null);
+  };
+
+  const clearDomainError = () => {
+    setDomainError(null);
+  };
+
+  return (
+    <AuthContext.Provider
+      value={{
+        user,
+        loading,
+        domainError,
+        signInWithGoogle,
+        signOutUser,
+        clearDomainError,
+        bypassDomainCheck,
+        setBypassDomainCheck,
+        signInAsDemoUser
+      }}
+    >
+      {children}
+    </AuthContext.Provider>
+  );
 };
 
-// Delete a listing from Firestore or local state
-export const deleteListingFromStore = async (listingId: string): Promise<void> => {
-  if (db && !listingId.startsWith('local-') && !listingId.startsWith('listing-')) {
-    try {
-      await deleteDoc(doc(db, 'listings', listingId));
-    } catch (error) {
-      handleFirestoreError(error, OperationType.DELETE, `listings/${listingId}`);
-      throw error;
-    }
-  } else {
-    const current = getLocalListings();
-    const updated = current.filter((item) => item.id !== listingId);
-    saveLocalListings(updated);
+export const useAuth = () => {
+  const context = useContext(AuthContext);
+  if (!context) {
+    throw new Error('useAuth must be used within an AuthProvider');
   }
+  return context;
 };
