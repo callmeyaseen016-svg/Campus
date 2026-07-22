@@ -1,0 +1,6 @@
+{
+  "name": "Campus Cart - AI Campus Marketplace",
+  "description": "Single-page AI Campus Marketplace web app for college students buying and selling books, cycles, and electronics with real-time sync, search, filters, and authentication.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
